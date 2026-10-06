@@ -50,10 +50,12 @@ from .provider import IndexingError
 from .parser import get_single_dictionary
 from .scope import (
     SCOPE_CONFIG_KEY,
+    SCOPE_AUTOINIT_CONFIG_KEY,
     get_scope_decks,
     get_all_deck_names,
     implied_note_types,
     missing_scope_decks,
+    maybe_auto_init_scope,
 )
 
 
@@ -229,14 +231,16 @@ class ScopeDialog(QDialog):
         self.setLayout(layout)
 
         # Banner
-        title = QLabel("<b>Scope — which decks CompreDef considers</b>")
+        title = QLabel("<b>Scope — which decks count for knowledge</b>")
         layout.addWidget(title)
         hint = QLabel(
-            "Only cards in checked decks count — for definition generation "
-            "<b>and</b> for word / kanji knowledge.<br>"
+            "Only cards in checked decks count for word / kanji knowledge "
+            "(the scoring weights behind definition ranking).<br>"
+            "Generation itself needs no Scope: the editor's CD toggle + Tab "
+            "fills any card's empty Definition.<br>"
             "Checking a deck covers it <b>and all of its subdecks</b>, but "
             "<b>not sibling decks</b> — check the shared parent to cover a whole branch. "
-            "Empty scope disables everything."
+            "Empty scope means empty knowledge (scoring falls back to maximal readability)."
         )
         hint.setTextFormat(Qt.TextFormat.RichText if hasattr(Qt, "TextFormat") else 1)  # type: ignore
         hint.setStyleSheet("color: gray; font-size: 11px;")
@@ -334,9 +338,9 @@ class ScopeDialog(QDialog):
         """Live summary + missing-deck detection."""
         sel = self.selected_decks()
         if not sel:
-            self.summary_label.setText("Scope: <b>none</b> — generation and knowledge disabled.")
+            self.summary_label.setText("Scope: <b>none</b> — knowledge empty (generation still works via the CD toggle + Tab).")
             self.summary_label.setStyleSheet("color: #c0392b; font-size: 11px;")
-            self.warning_label.setText("Pick at least one deck above, or definitions will never generate.")
+            self.warning_label.setText("Knowledge is empty: scoring cannot personalize until you pick at least one Japanese deck above.")
             self.warning_label.setVisible(True)
             return
         self.summary_label.setStyleSheet("color: #2a7d4f; font-size: 11px;")
@@ -428,14 +432,16 @@ class ConfigDialog(QDialog):
         scope_tab_layout.setSpacing(8)
         scope_tab.setLayout(scope_tab_layout)
 
-        scope_title = QLabel("<b>Scope — which decks CompreDef considers</b>")
+        scope_title = QLabel("<b>Scope — which decks count for knowledge</b>")
         scope_tab_layout.addWidget(scope_title)
         scope_hint = QLabel(
-            "Only cards in checked decks count — for definition generation "
-            "<b>and</b> for word / kanji knowledge.<br>"
+            "Only cards in checked decks count for word / kanji knowledge "
+            "(the scoring weights behind definition ranking).<br>"
+            "Generation itself needs no Scope: the editor's CD toggle + Tab "
+            "fills any card's empty Definition.<br>"
             "Checking a deck covers it <b>and all of its subdecks</b>, but "
             "<b>not sibling decks</b> — check the shared parent to cover a whole branch. "
-            "Empty scope disables everything."
+            "Empty scope means empty knowledge (scoring falls back to maximal readability)."
         )
         # RichText where available
         try:
@@ -505,10 +511,12 @@ class ConfigDialog(QDialog):
         mapping_title = QLabel("<b>Field Mapping</b> — how each note type is read")
         mapping_tab_layout.addWidget(mapping_title)
         intro = QLabel(
-            "Note types are <b>implied by your Scope</b> — selecting a deck "
-            "automatically enables every note type inside it. Pick a type below "
-            "to check / fix its field mapping. Auto-detected mappings work "
-            "immediately; you only need to edit if the guess is wrong."
+            "Note types are <b>implied by your Scope</b> for knowledge — but "
+            "generation works for <b>any</b> note type: the CD toggle + Tab "
+            "uses the mapping below, auto-inferring when a type has none. "
+            "Pick a type to check / fix its field mapping. Auto-detected "
+            "mappings work immediately; you only need to edit if the guess "
+            "is wrong."
         )
         try:
             intro.setTextFormat(Qt.TextFormat.RichText)  # type: ignore
@@ -738,13 +746,15 @@ class ConfigDialog(QDialog):
         # unfocused with an empty definition (restored feature — see
         # editor_browser.py for the stability contract).
         self.tab_generate_check = QCheckBox(
-            "Tab-to-Generate: fill empty definition when leaving the word field "
+            "Auto-generate (CD toolbar toggle): fill empty definition when leaving the word field "
             "(Tab / clicking away)"
         )
         self.tab_generate_check.setToolTip(
-            "When enabled, unfocusing the word field automatically generates a "
+            "The global CD toggle (same switch as the editor toolbar's CD "
+            "button). When ON, unfocusing the word field automatically generates a "
             "definition\nif (and only if) the definition field is empty. Existing "
-            "definitions are never\noverwritten — use the CD toolbar button for that."
+            "definitions are never\noverwritten — clear the field first to regenerate, "
+            "or use Browser bulk."
         )
         # CRITICAL: restore the saved state AT CREATION TIME, before any
         # _save_config_now() can fire. _load_config() restores the dictionary
@@ -954,13 +964,13 @@ class ConfigDialog(QDialog):
     def _refresh_scope_label(self) -> None:
         """Updates the Scope summary + warning + implied-types preview."""
         if not self.scope_decks:
-            self.scope_summary_label.setText("Scope: <b>none</b> — generation and knowledge disabled.")
+            self.scope_summary_label.setText("Scope: <b>none</b> — knowledge empty (generation still works via the CD toggle + Tab).")
             try:
                 self.scope_summary_label.setTextFormat(Qt.TextFormat.RichText)  # type: ignore
             except Exception:
                 pass
             self.scope_summary_label.setStyleSheet("color: #c0392b; font-size: 11px;")
-            self.scope_warning_label.setText("Pick at least one deck above, or definitions will never generate.")
+            self.scope_warning_label.setText("Knowledge is empty: scoring cannot personalize until you pick at least one Japanese deck above.")
             self.scope_warning_label.setVisible(True)
             self.scope_implied_label.setText("")
             return
@@ -1159,9 +1169,32 @@ class ConfigDialog(QDialog):
         Out-of-scope saved mappings are kept (not deleted) so narrowing
         the scope never destroys field configuration.
         """
-        # Fresh installs start with an EMPTY scope + warning (fail-closed
-        # by user decision): no inference from legacy targets.
+        # Fresh installs start with Japanese decks pre-selected (the
+        # auto-init guess runs ONCE — the flag keeps a deliberate user
+        # Clear from being re-seeded). Scope bounds only knowledge;
+        # generation works everywhere via the CD toggle + Tab.
         self.scope_decks = get_scope_decks(self.config)
+        if not self.scope_decks and not self.config.get(SCOPE_AUTOINIT_CONFIG_KEY):
+            try:
+                guess = maybe_auto_init_scope(
+                    self.config, mw.col if mw else None)
+            except Exception:
+                guess = []
+            if guess:
+                self.scope_decks = list(guess)
+                print(f"CompreDef: fresh-install Scope auto-selected "
+                      f"{len(guess)} Japanese deck(s): {', '.join(guess)}")
+            self.config[SCOPE_AUTOINIT_CONFIG_KEY] = True
+            try:
+                if mw and hasattr(mw, "addonManager"):
+                    _cfg = dict(mw.addonManager.getConfig(self.addon_name) or {})
+                    _cfg[SCOPE_AUTOINIT_CONFIG_KEY] = True
+                    if self.scope_decks:
+                        _cfg[SCOPE_CONFIG_KEY] = list(self.scope_decks)
+                    mw.addonManager.writeConfig(self.addon_name, _cfg)
+                    self.config = mw.addonManager.getConfig(self.addon_name) or self.config
+            except Exception:
+                pass
         self.type_mappings = {}
         saved_targets = self.config.get("targets")
         if isinstance(saved_targets, dict) and saved_targets:
@@ -1955,14 +1988,15 @@ class ConfigDialog(QDialog):
 
         updated_config = {
             **self._collect_type_config(),
-            # Scope: the single deck selection driving generation AND
-            # knowledge (empty = fail-closed, nothing generates).
+            # Scope: the deck selection driving KNOWLEDGE (scoring
+            # weights). Generation bypasses Scope (CD toggle + Tab).
             SCOPE_CONFIG_KEY: list(self.scope_decks),
+            SCOPE_AUTOINIT_CONFIG_KEY: True,
             "dictionaries": ordered_dicts,
             # Disabled paths: kept in `dictionaries` for order preservation,
             # listed here so generation skips them.
             "disabled_dictionaries": sorted(self.disabled_dicts),
-            # Tab-to-Generate (auto-fill on word-field unfocus)
+            # Auto-generate = the global CD toggle (toolbar button + Tab)
             "tab_generate": self.tab_generate_check.isChecked(),
             "plain_text_definitions": self.plain_text_check.isChecked(),
             "dictionary_source": self.source_combo.currentData() or "local",
@@ -2046,6 +2080,7 @@ class ConfigDialog(QDialog):
             mw.addonManager.writeConfig(self.addon_name, {
                 **self._collect_type_config(),
                 SCOPE_CONFIG_KEY: list(self.scope_decks),
+                SCOPE_AUTOINIT_CONFIG_KEY: True,
                 "dictionaries": ordered_dicts,
                 "disabled_dictionaries": sorted(self.disabled_dicts),
                 "tab_generate": self.tab_generate_check.isChecked(),

@@ -68,7 +68,37 @@ def _on_profile_opened() -> None:
     thus the collection) opens. Add-ons load BEFORE the profile, so the
     init_caches_async() call above finds mw.col None and deliberately
     does nothing — this hook is what starts the real build.
+
+    Fresh installs also get their Scope auto-seeded here (Japanese
+    decks pre-selected, once) BEFORE the snapshot builds, so scoring
+    personalizes immediately without opening the config dialog.
     """
+    try:
+        from .scope import (maybe_auto_init_scope as _guess,
+                            SCOPE_CONFIG_KEY as _KEY,
+                            SCOPE_AUTOINIT_CONFIG_KEY as _FLAG)
+    except Exception:
+        try:
+            from scope import (maybe_auto_init_scope as _guess,
+                               SCOPE_CONFIG_KEY as _KEY,
+                               SCOPE_AUTOINIT_CONFIG_KEY as _FLAG)
+        except Exception:
+            _guess = None
+    try:
+        if _guess is not None and mw and mw.addonManager and mw.col:
+            name = mw.addonManager.addonFromModule(__name__) or __name__.split('.')[0]
+            cfg = mw.addonManager.getConfig(name) or {}
+            if not cfg.get(_FLAG) and not list(cfg.get(_KEY) or []):
+                guess = _guess(cfg, mw.col)
+                cfg[_FLAG] = True
+                if guess:
+                    cfg[_KEY] = list(guess)
+                    print(f"CompreDef: fresh-install Scope auto-selected "
+                          f"{len(guess)} Japanese deck(s).")
+                mw.addonManager.writeConfig(name, cfg)
+    except Exception as e:
+        # Must never break profile loading
+        print(f"CompreDef: scope auto-init on profile open failed: {e}")
     try:
         anki.init_caches_async()
     except Exception as e:

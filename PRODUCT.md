@@ -22,16 +22,17 @@ vocabulary into Anki and want each card's definition to be readable
 
 ## Core user journeys
 
-1. **Generate while adding/mining.** User types a word (e.g. 不公平)
-   into the Expression field; CompreDef fills the Definition field —
-   via toolbar button, Tab-to-Generate on field blur, or Browser bulk
-   generation for hundreds of notes at once.
+1. **Generate while adding/mining.** User flips the CD toolbar
+   toggle ON once; typing a word (e.g. 不公平) into the Expression
+   field then fills the Definition field on Tab — for any card, no
+   deck setup. Browser bulk generation covers hundreds of notes at
+   once (and is the deliberate overwrite path).
 2. **Set up dictionaries once.** User installs their dictionaries;
    every future generation scores every dictionary's definitions and
    returns the most readable one automatically.
 3. **Scope their decks.** User picks which decks count as "their
-   Japanese"; everything else (e.g. a French deck) never influences
-   scoring or knowledge.
+   Japanese" for knowledge/scoring (fresh installs pre-select
+   Japanese decks automatically); generation itself never needs Scope.
 4. **Inspect what the add-on thinks they know.** Learner Knowledge
    dialog: mastered/seen kanji + vocab counts, full lists, provenance
    search into the Browser.
@@ -61,12 +62,13 @@ vocabulary into Anki and want each card's definition to be readable
 
 ## UX requirements
 
-- Never overwrite user content (Tab never fills a non-empty field;
-  bulk never touches unmapped types silently).
+- Never overwrite user content automatically (Tab and the toolbar
+  toggle fill only empty fields; Browser bulk is the explicit
+  overwrite path; bulk never touches unmapped types silently).
 - Never freeze the UI (heavy work on background threads).
-- Fail closed and loud: empty Scope ⇒ no generation + visible
-  guidance; DB/schema problems ⇒ console + tooltip, never a silent
-  empty result.
+- Fail closed and loud: empty Scope ⇒ empty knowledge + visible
+  guidance (generation still works); DB/schema problems ⇒ console
+  + tooltip, never a silent empty result.
 - Cross-version: PyQt5/PyQt6 imports via `aqt.qt`; schema-proof SQL
   (`notes`/`cards` only, never the legacy `models` table).
 

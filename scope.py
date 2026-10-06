@@ -32,10 +32,53 @@ renamed to ``notetypes`` in Anki 23.10+).
 """
 
 from typing import Any, Dict, List, Optional, Set
+import re
 
 SCOPE_CONFIG_KEY = "scope_decks"
 
+# Set once the fresh-install Japanese-deck heuristic has run (even when
+# it found nothing), so a user who deliberately empties the Scope is
+# never re-seeded on the next launch.
+SCOPE_AUTOINIT_CONFIG_KEY = "scope_auto_initialized"
+
 _CHILD_SEP = "::"
+
+# Japanese script: hiragana + katakana (+ half-width katakana) + CJK.
+# Kana presence is what separates Japanese decks from Chinese ones
+# (kanji alone) and Western ones (neither) for the fresh-install guess.
+_JAPANESE_RE = re.compile(r'[\u3040-\u309f\u30a0-\u30ff\uff61-\uff9f\u4e00-\u9faf]')
+_KANA_RE = re.compile(r'[\u3040-\u309f\u30a0-\u30ff\uff61-\uff9f]')
+
+# Lowercased substrings that mark a deck NAME as Japanese-learner
+# material. Deliberately broad: a false positive (e.g. a French deck
+# named "Vocab") only adds kana-less notes to the knowledge scan,
+# which contribute no kanji points — while a missed Japanese deck
+# silently starves scoring. Content sampling below catches oddly
+# named decks that carry kana.
+_JAPANESE_NAME_KEYWORDS = (
+    "japan", "jap ", "japanese", "nihon", "nihongo", "にほん",
+    "日本", "jlpt", "kanji", "漢字", "かんじ", "カンジ",
+    "kana", "かな", "カナ", "hiragana", "katakana", "ひらがな",
+    "カタカナ", "tango", "単語", "たんご", "kaishi", "core ",
+    "core2", "core6", "mining", "animecard", "yomitan",
+    "jouyou", "じょうよう", "じょう用", "kanken", "expression",
+    "furigana",
+)
+
+
+def is_japanese_deck_name(name: str) -> bool:
+    """True when a deck NAME looks like Japanese-learner material.
+
+    Pure (no collection/DB): Japanese script anywhere in the name, or
+    a case-insensitive keyword hit. Used by the fresh-install Scope
+    guess and covered in Ring 0.
+    """
+    if not name or not isinstance(name, str):
+        return False
+    if _JAPANESE_RE.search(name):
+        return True
+    lowered = f" {name.lower()} "
+    return any(kw in lowered or kw in name.lower() for kw in _JAPANESE_NAME_KEYWORDS)
 
 
 def get_scope_decks(config: Optional[Dict[str, Any]]) -> List[str]:
@@ -407,3 +450,107 @@ def note_in_scope(
     if not type_name:
         return False
     return type_name in set(implied_note_types(col, scope))
+
+
+# How many first-field samples to read per deck when guessing whether
+# an oddly-named deck holds Japanese. Small on purpose: the guess runs
+# once on fresh installs inside the config dialog / profile-open path,
+# so per-deck cost stays a single LIMITed SELECT.
+_SUGGEST_SAMPLE_LIMIT = 20
+
+
+def _sample_first_fields(col: Any, dids: Set[int], limit: int) -> List[str]:
+    """Returns up to `limit` first-field texts for cards in `dids`.
+
+    Schema-proof (notes/cards only). Never raises — [] on any failure.
+    """
+    if col is None or not dids:
+        return []
+    try:
+        did_list = ",".join(str(int(d)) for d in sorted(dids))
+        rows = col.db.all(
+            "SELECT notes.flds FROM notes "
+            "JOIN cards ON cards.nid = notes.id "
+            f"WHERE cards.did IN ({did_list}) "
+            f"LIMIT {int(limit)}"
+        ) or []
+    except Exception:
+        return []
+    out: List[str] = []
+    for row in rows:
+        blob = row[0] if isinstance(row, (list, tuple)) else row
+        if isinstance(blob, str) and blob:
+            out.append(blob.split("\x1f", 1)[0].strip())
+    return out
+
+
+def suggest_japanese_decks(col: Any) -> List[str]:
+    """Guesses which decks hold Japanese cards (fresh-install default).
+
+    Two passes, cheapest first:
+    1. Name pass (no DB): decks whose NAME looks Japanese
+       (see is_japanese_deck_name).
+    2. Content pass (one small LIMITed SELECT per remaining deck):
+       decks with kana in sampled first fields. Kana is the
+       discriminator — Chinese decks carry kanji but no kana, Western
+       decks carry neither.
+
+    Returns names in collection order. [] when the collection is
+    unavailable or nothing looks Japanese (caller then keeps the
+    fail-closed empty scope + warning). Never raises.
+    """
+    try:
+        all_names = get_all_deck_names(col)
+    except Exception:
+        return []
+    if not all_names or col is None:
+        return []
+    suggested: List[str] = []
+    for name in all_names:
+        if is_japanese_deck_name(name):
+            suggested.append(name)
+    if len(suggested) == len(all_names):
+        return suggested
+    # Content pass for the oddly-named remainder.
+    try:
+        name_to_did = _deck_name_to_did(col)
+    except Exception:
+        return suggested
+    for name in all_names:
+        if name in suggested:
+            continue
+        try:
+            expanded = expand_scope_names(all_names, [name])
+            dids = {name_to_did[n] for n in expanded if n in name_to_did}
+            if not dids:
+                continue
+            for text in _sample_first_fields(col, dids, _SUGGEST_SAMPLE_LIMIT):
+                if _KANA_RE.search(text):
+                    suggested.append(name)
+                    break
+        except Exception:
+            continue
+    # Preserve collection order.
+    order = {n: i for i, n in enumerate(all_names)}
+    return sorted(set(suggested), key=lambda n: order.get(n, 0))
+
+
+def maybe_auto_init_scope(config: Optional[Dict[str, Any]], col: Any) -> List[str]:
+    """Fresh-install Scope default: Japanese decks pre-selected.
+
+    Returns the scope deck list to USE. When the config was never
+    auto-initialized AND holds an empty scope, the Japanese guess
+    above becomes the scope (persisted by the caller with the
+    auto-initialized flag, so a deliberate user Clear is never
+    re-seeded). Otherwise returns the configured scope untouched.
+    Never raises; never returns None.
+    """
+    configured = get_scope_decks(config)
+    if configured:
+        return configured
+    if isinstance(config, dict) and config.get(SCOPE_AUTOINIT_CONFIG_KEY):
+        return []
+    try:
+        return suggest_japanese_decks(col)
+    except Exception:
+        return []

@@ -13,9 +13,10 @@ can currently read — automatically, without per-word effort.
 ## Included capabilities (all shipped, all tested)
 
 - Dictionary management GUI (add folder/ZIP, reorder, enable/disable)
-- Install-time indexing → pure-SQLite generation (button, Tab,
-  Browser bulk with `Ctrl+Shift+D`)
-- Deck Scope (subdecks included, fail-closed, quick-fix add-deck)
+- Install-time indexing → pure-SQLite generation (CD toggle + Tab
+  fill-empty, Browser bulk with `Ctrl+Shift+D` as the overwrite path)
+- Deck Scope for knowledge (subdecks included, fail-closed for
+  weights, Japanese decks pre-selected on fresh installs)
 - Multi-type field targets + auto-inference ("no need to add each
   note type")
 - Interval-weighted learner knowledge (mastered ≥ 365d / seen > 0d),

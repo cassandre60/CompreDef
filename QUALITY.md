@@ -14,9 +14,13 @@ Answers: *what properties must remain true?*
 - **Q-K3 — Mastered means mature.** Mastered = on a note with a card
   interval ≥ 365 days (`_MATURE_IVL_DAYS`, single source of truth).
   Seen = any strictly positive interval.
-- **Q-K4 — Scope-bounded universe.** Only cards in Scope decks
-  (subdecks included) count; empty scope is fail-closed (empty
-  knowledge, visible guidance); out-of-scope decks never leak in.
+- **Q-K4 — Scope-bounded knowledge, generation-independent.**
+  Only cards in Scope decks (subdecks included) count for knowledge;
+  empty scope is fail-closed for knowledge (empty weights, visible
+  guidance) while generation still works everywhere via the CD toggle.
+  Out-of-scope decks never leak into knowledge. Fresh installs
+  auto-preselect Japanese decks once (name + kana heuristic); a
+  deliberate user Clear is never re-seeded.
 - **Q-K5 — Session snapshot.** Builds once per session (async at
   startup), reused for all generations; note edits/writes never
   rebuild it; explicit reset rebuilds exactly once; never snapshot
@@ -39,9 +43,10 @@ Answers: *what properties must remain true?*
 
 ## Generation behavior
 
-- **Q-G1 — Never overwrite user content.** Tab/bulk never fill a
-  non-empty definition field; unmapped types are skipped, not
-  guessed.
+- **Q-G1 — Never overwrite automatically.** Tab and the toolbar
+  toggle fill ONLY an empty definition field; unmapped types are
+  skipped, not guessed. Browser bulk is the deliberate regenerate
+  path and MAY overwrite the notes the user selected.
 - **Q-G2 — Density argmax.** Dictionaries are collected,
   never reordered; the winner is the highest comprehension DENSITY
   (known-kanji fraction + known-compound fraction, v1.3 — raw sums

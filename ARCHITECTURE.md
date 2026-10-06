@@ -110,18 +110,25 @@ Implementation (provider.py -> LocalSQLiteProvider)
 ```
 
 ### Key Modules
-- `scope.py`: Deck-based Scope — the single deck selection driving
-  BOTH generation eligibility and knowledge. Deck names (subdecks
-  included); a note is in scope when ANY of its cards sits in a scoped
-  deck; empty scope is fail-closed.
+- `scope.py`: Deck-based Scope — the deck selection driving the
+  learner-KNOWLEDGE snapshot only (scoring weights). Deck names
+  (subdecks included); a note counts when ANY of its cards sits in a
+  scoped deck; empty scope is fail-closed for knowledge (empty
+  weights). Fresh installs auto-preselect Japanese decks once
+  (`suggest_japanese_decks`: name keywords + kana content sampling).
+  Generation NEVER consults Scope — it is governed by the global CD
+  toggle (`tab_generate`) + field mapping (explicit `targets` or
+  auto-inference).
 - `gui.py`, `editor_browser.py`: Anki-specific UI and hook logic. The
   config GUI offers a compact Scope row + deck picker dialog; per-type
-  field mappings ("targets") are kept only for types implied by the
-  scoped decks. Generation paths resolve fields per note via
-  `resolve_fields_for_note` plus the Scope gate. Editor toolbar button,
-  Tab-to-Generate (legacy-editor unfocus hook), Browser bulk actions,
-  and the Learner Knowledge dialog (non-modal, payload-cached) live
-  here.
+  field mappings ("targets") are kept for all types, with
+  auto-inference fallback for unmapped ones. Generation paths resolve
+  fields per note via `resolve_fields_for_note` (mapping only, no Scope
+  gate). Editor toolbar toggle (Chinese-Support style, `toggleable`
+  "CD" button mirroring `tab_generate`, active class synced on note
+  load), Tab-to-Generate (legacy-editor unfocus hook, fill-empty
+  only), Browser bulk actions (the deliberate overwrite path), and the
+  Learner Knowledge dialog (non-modal, payload-cached) live here.
 - `core.py`: Application wiring and singleton management.
 - `engine.py`: Implements definition generation (pure
   argmax over comprehension density via `picker.py`, order-independent;

@@ -1528,12 +1528,13 @@ def test_tab_generate_decisions() -> None:
     check("tab: out-of-range ordinal returns ''",
           eb._field_name_at(note, 99) == "")
 
-    # 13. Out-of-scope notes never auto-generate, even with an empty def.
+    # 13. Deck Scope never gates Tab: a note in a NON-scope deck still
+    #     auto-generates (Scope bounds only knowledge/scoring weights).
     fr_note = FakeNote({"Expression": "試験", "Definition": ""}, nid=999)
     aqt.mw.col.db.notes[999] = {"flds": "x", "dids": [
         aqt.mw.col.decks.decks["French"]], "mid": 2}
-    check("tab: out-of-scope deck never auto-generates",
-          not eb._should_auto_generate(fr_note, "Expression", base_config))
+    check("tab: other-deck notes still auto-generate (no Scope gate)",
+          eb._should_auto_generate(fr_note, "Expression", base_config))
 
     _restore_collection_state(scope_state)
 
@@ -1848,32 +1849,155 @@ def test_multi_note_type_targeting() -> None:
               Note({"Expression": "x", "Definition": ""}, "Japanese"),
               "Expression", legacy_config))
 
-    # 6. Scope gate: a configured type outside the Scope decks never
-    #    generates, and an in-scope note with an emptied scope is dead.
-    check("multi: configured type out of scope is rejected",
+    # 6. Scope gate REMOVED (v1.3): generation never consults Scope —
+    #    Scope bounds only knowledge/scoring. A configured type resolves
+    #    even with a mismatched or empty scope.
+    check("multi: mismatched scope no longer blocks generation",
           eb.resolve_fields_for_note(
               Note({"Word": "x", "Furigana": "f", "Definition": "d"},
                    "JP Mining Note"),
-              {**targets_config, "scope_decks": ["French"]}) is None)
-    check("multi: empty scope rejects everything",
+              {**targets_config, "scope_decks": ["French"]}) is not None)
+    check("multi: empty scope no longer blocks generation",
           eb.resolve_fields_for_note(
               Note({"Word": "x", "Furigana": "f", "Definition": "d"},
                    "JP Mining Note"),
-              {**targets_config, "scope_decks": []}) is None)
+              {**targets_config, "scope_decks": []}) is not None)
 
-    # 7. Mapping-fail routes AWAY from the add-deck dialog (v1.2
-    #    quick-fix contract, the 会社 complaint): an in-scope note
-    #    whose fields cannot be mapped must get the field-mapping
-    #    dialog, NEVER an "Add deck" offer (which looped forever).
-    #    (ANY-deck membership itself is covered by test_scope_deck_filtering.)
+    # 7. Mapping-fail routes to the Fields dialog (v1.2 quick-fix
+    #    contract, the 会社 complaint): a note whose fields cannot be
+    #    mapped gets the field-mapping dialog, NEVER an "Add deck" offer
+    #    (which looped forever). Generation ignores Scope, so the dialog
+    #    is mapping-only by construction.
+    #    (Scope membership itself is covered by test_scope_deck_filtering.)
     nomap_note = Note({"Front": "x", "Back": ""}, "Japanese")
     nomap_cfg = {"scope_decks": ["Japanese"], "targets": {}}
-    check("multi: scope-pass + mapping-fail resolves to None",
+    check("multi: mapping-fail resolves to None",
           eb.resolve_fields_for_note(nomap_note, nomap_cfg) is None)
-    check("multi: mapping-fail note is still in scope (no add-deck loop)",
+    check("multi: mapping-fail note is still in scope (knowledge-side)",
           eb._note_in_scope(nomap_note, nomap_cfg) is True)
 
     _restore_collection_state(scope_state)
+
+
+def test_cd_toggle_and_japanese_scope_guess() -> None:
+    """
+    Chinese-Support-style toggle + knowledge-only Scope (v1.3):
+    - the toolbar button is a toggleable switch bound to the global
+      `tab_generate` flag (active class + tip follow the config);
+    - Tab ignores deck Scope entirely (Scope bounds only knowledge);
+    - fresh installs guess Japanese decks (name keywords + kana
+      content sampling) exactly once (auto-init flag).
+    """
+    _ensure_editor_browser_stubs()
+    eb = _import_editor_browser()
+
+    scope_state = _save_collection_state()
+    try:
+        jp_did = aqt.mw.col.decks.add("Japanese")
+        aqt.mw.col.decks.add("French")
+        odd_did = aqt.mw.col.decks.add("My Odd Deck")
+        # Kana-bearing first field in the oddly-named deck: content
+        # pass must catch it; the French deck stays kana-free.
+        aqt.mw.col.db.notes[201] = {
+            "flds": "たべる\x1fto eat", "dids": [odd_did], "mid": 1}
+        aqt.mw.col.db.notes[202] = {
+            "flds": "manger\x1fto eat", "dids": [
+                aqt.mw.col.decks.decks["French"]], "mid": 2}
+
+        # 1. Toggle flag: missing key defaults ON, explicit False off.
+        check("toggle: missing key defaults to enabled",
+              eb._tab_generate_enabled({}) is True)
+        check("toggle: explicit False disables",
+              eb._tab_generate_enabled({"tab_generate": False}) is False)
+        check("toggle: tips differ by state",
+              eb._toggle_tip(True) != eb._toggle_tip(False))
+
+        # 2. Toolbar button is registered toggleable with the toggle cmd.
+        seen: dict = {}
+
+        class FakeEditor:
+            def addButton(self, **kw):
+                seen.update(kw)
+                return "<button>CD</button>"
+        eb.add_editor_button([], FakeEditor())
+        check("toggle: button is toggleable",
+              seen.get("toggleable") is True, f"got {seen}")
+        check("toggle: button fires the toggle cmd",
+              seen.get("cmd") == "compredef_toggle_autogen",
+              f"got {seen.get('cmd')}")
+        check("toggle: button id stable for visual sync",
+              seen.get("id") == "compredef_editor_btn",
+              f"got {seen.get('id')}")
+
+        # 3. Visual sync never crashes headless editors (no webview).
+        try:
+            eb._set_toggle_visual(object(), True)
+            eb._sync_toggle_visual(object())
+            visual_ok = True
+        except Exception:
+            visual_ok = False
+        check("toggle: visual sync is headless-safe", visual_ok)
+
+        # 4. Tab bypasses Scope: French-deck note fires when toggle ON.
+        class FakeNote:
+            def __init__(self, fields, nid=202):
+                self._fields = fields
+                self.id = nid
+
+            def note_type(self):
+                return {"name": "French"}
+
+            def __contains__(self, name):
+                return name in self._fields
+
+            def __getitem__(self, name):
+                return self._fields[name]
+
+            def keys(self):
+                return list(self._fields)
+
+        fr_cfg = {"word_field": "Expression",
+                  "definition_field": "Definition",
+                  "tab_generate": True, "scope_decks": ["Japanese"]}
+        check("toggle: Tab fires outside Scope when ON",
+              eb._should_auto_generate(
+                  FakeNote({"Expression": "manger", "Definition": ""}),
+                  "Expression", fr_cfg))
+        check("toggle: Tab silent when toggle OFF",
+              not eb._should_auto_generate(
+                  FakeNote({"Expression": "manger", "Definition": ""}),
+                  "Expression", {**fr_cfg, "tab_generate": False}))
+
+        # 5. Japanese guess: name hit + kana-content hit, French excluded.
+        guess = compredef_scope.suggest_japanese_decks(aqt.mw.col)
+        check("guess: Japanese deck by name",
+              "Japanese" in guess, f"got {guess}")
+        check("guess: kana-content deck caught",
+              "My Odd Deck" in guess, f"got {guess}")
+        check("guess: French deck excluded",
+              "French" not in guess, f"got {guess}")
+
+        # 6. Name heuristic is pure (Ring-0 style, no collection).
+        check("guess: 日本語 name matches",
+              compredef_scope.is_japanese_deck_name("My 日本語 deck"))
+        check("guess: French name misses",
+              not compredef_scope.is_japanese_deck_name("French"))
+        check("guess: empty name misses",
+              not compredef_scope.is_japanese_deck_name(""))
+
+        # 7. Auto-init runs once: empty+unflagged guesses; flagged stays empty.
+        _jp = jp_did  # keep linters quiet about the deck id
+        got = compredef_scope.maybe_auto_init_scope({}, aqt.mw.col)
+        check("autoinit: empty unflagged config guesses",
+              "Japanese" in got, f"got {got}")
+        check("autoinit: flagged empty config stays empty",
+              compredef_scope.maybe_auto_init_scope(
+                  {"scope_auto_initialized": True}, aqt.mw.col) == [])
+        check("autoinit: configured scope passes through untouched",
+              compredef_scope.maybe_auto_init_scope(
+                  {"scope_decks": ["French"]}, aqt.mw.col) == ["French"])
+    finally:
+        _restore_collection_state(scope_state)
 
 
 def test_v12_scoring_algorithm() -> None:
@@ -4048,6 +4172,7 @@ def main() -> int:
         test_tab_generate_decisions()
         test_apply_definition_refresh_order()
         test_multi_note_type_targeting()
+        test_cd_toggle_and_japanese_scope_guess()
         test_scope_deck_filtering()
         test_v12_scoring_algorithm()
         test_picker_audit_strict()

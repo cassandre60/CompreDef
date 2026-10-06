@@ -1,5 +1,6 @@
 {
     "scope_decks": [],
+    "scope_auto_initialized": false,
     "targets": {},
     "note_type": "",
     "word_field": "Expression",

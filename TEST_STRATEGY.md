@@ -56,9 +56,10 @@ single source of truth; keep it current when adding functions.
   engine keeps only thin delegates.
 - `scope.py` — Ring 0: `get_scope_decks`, `expand_scope_names`,
   `missing_scope_decks`, `is_scope_empty`, `_note_type_name` (bare
-  stand-in notes). Ring 1: every `col`-backed path
-  (`note_in_scope`, `implied_note_types`, `resolve_deck_for_note`,
-  …) via the fake collection.
+  stand-in notes), `is_japanese_deck_name` (name heuristic). Ring 1:
+  every `col`-backed path (`note_in_scope`, `implied_note_types`,
+  `resolve_deck_for_note`, `suggest_japanese_decks`,
+  `maybe_auto_init_scope`, …) via the fake collection.
 - `models.py` — Ring 0: dataclass construction, defaults,
   frozen-ness.
 - `renderer.py` — Ring 0: `_style_to_css`, `_extract_plain_text_node`,
@@ -92,13 +93,13 @@ single source of truth; keep it current when adding functions.
 | Q-K1 first-field-only | `test_kanji_extraction_correctness` (+ S2/S3 twins in `sanity_knowledge.py`) |
 | Q-K2 no type gating | `test_kanji_extraction_correctness` (multi-layout notes) |
 | Q-K3 mastered ≥ 365d | `test_kanji_extraction_correctness` (182.5/100d notes seen-not-mastered), summary/totals tests |
-| Q-K4 scope-bounded, fail-closed | `test_scope_deck_filtering`, `test_multi_note_type_targeting` §6, empty-scope cases |
+| Q-K4 scope-bounded, fail-closed | `test_scope_deck_filtering`, knowledge empty-scope cases (generation bypasses Scope by design; `test_multi_note_type_targeting` §6 pins mapping-without-scope) |
 | Q-K5 session snapshot | `test_snapshot_waits_for_open_collection`, `test_sync_reset_is_thread_safe`, `test_dialog_payload_cached_per_generation` |
 | Q-D1 native wrapper only | Code review + `test_db_connections_are_closed`; `debug/README.md` S1 AST scan |
 | Q-D2 schema-proof SQL | `test_knowledge_survives_new_schema` (rejects legacy `models` table), S1 AST scan |
 | Q-D3 visible failure | `test_indexing_failure_reported`, `_warn_db_error` paths |
 | Q-D4 graceful degradation | Empty-scope / missing-field / malformed-row cases across suite |
-| Q-G1 never overwrite | Tab decision matrix (`test_tab_generate_decisions`), bulk skip paths |
+| Q-G1 never overwrite | Tab decision matrix (`test_tab_generate_decisions`), editor fill-empty guard (toggle/Tab never overwrite; Browser bulk is the explicit overwrite path) |
 | Q-G2 density argmax | `test_order_independent_argmax`, `test_v12_scoring_algorithm` (§7 density), `test_disabled_dictionaries_skipped`, `test_picker_audit_strict` (frozen winners + picker/rank agreement + order-independence + human grades on the real-deck fixture) |
 | Q-G3 kana never scores | `test_scoring_ignores_furigana`, `test_parse_furigana_field_formats`, `test_reference_title_filtering`, `test_extract_clean_word_formats`, `test_reading_disambiguates_homographs` |
 | Q-G4 non-blocking UI | `test_sync_reset_is_thread_safe` (taskman main-thread rule), dialog `run_in_background` paths |

@@ -1,13 +1,19 @@
 """
-editor_browser.py - Editor toolbar button, Tab-to-Generate and Browser bulk
+editor_browser.py - Editor toolbar toggle, Tab-to-Generate and Browser bulk
 generation for CompreDef.
 
 Injects UI elements into Anki using `aqt.gui_hooks`:
-- Card Editor toolbar button to generate a definition for the current note.
-- Tab-to-Generate: leaving the configured word field (Tab / clicking away)
-  auto-fills the definition field when it is empty.
-- Browser Edit menu & context menu items to bulk generate definitions for
-  selected notes.
+- Card Editor toolbar TOGGLE (Chinese-Support style): a single
+  toggleable "CD" button whose active state is the global auto-generate
+  switch. When ON, leaving the word field (Tab / click-away) fills an
+  empty definition — never overwrites. Clicking ON also tries the
+  current note immediately. Deck Scope is never consulted for
+  generation; Scope bounds only learner knowledge (scoring weights).
+- Tab-to-Generate: leaving the configured word field auto-fills the
+  definition field when it is empty.
+- Browser Edit menu & context menu items to bulk generate definitions
+  for selected notes (the deliberate regenerate path — MAY overwrite,
+  unlike Tab/the toggle).
 
 Tab-to-Generate stability contract (this feature was removed in a1a92a3
 after it froze Anki and lost definitions; it is back ONLY because every
@@ -58,12 +64,8 @@ from .utils import parse_furigana_field, extract_clean_word, resolve_dictionary_
 # Dual-context sibling import (see core.py for why both forms are needed).
 if __package__:
     from .scope import note_in_scope as _scope_note_in_scope
-    from .scope import note_deck_names as _scope_note_deck_names
-    from .scope import SCOPE_CONFIG_KEY as _SCOPE_KEY
 else:
     from scope import note_in_scope as _scope_note_in_scope
-    from scope import note_deck_names as _scope_note_deck_names
-    from scope import SCOPE_CONFIG_KEY as _SCOPE_KEY
 
 
 def _get_addon_name() -> str:
@@ -128,13 +130,9 @@ def _get_note_type_name(note) -> str:
 
 def _note_in_scope(note, config: Dict[str, Any], editor: Any = None) -> bool:
     """
-    Scope gate shared by every generation path (editor button, bulk,
-    Tab-to-Generate): True only when the note has a card in one of the
-    user's Scope decks (subdecks included). An empty scope is
-    fail-closed (False). Unsaved Add-window notes are checked against
-    the deck the window will add to (editor's DeckChooser / curDeck).
-    Never raises — a scope-check failure must not break editing; it
-    only skips generation for this note.
+    Scope check kept for diagnostics and the knowledge snapshot's
+    universe — generation paths NO LONGER call it (Scope bounds only
+    knowledge, never eligibility). Never raises.
     """
     try:
         return bool(_scope_note_in_scope(note, config, editor=editor))
@@ -189,13 +187,11 @@ def _infer_field_mapping(note) -> Optional[Dict[str, str]]:
 
 
 def _resolve_mapping_for_inscope_note(note, config: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """Mapping resolution for a note that ALREADY passed the Scope gate.
+    """Mapping resolution for any note (Scope no longer gates generation).
 
     Returns the field mapping or None when no usable mapping exists
-    (explicit + inferred both failed). Kept separate so callers can
-    distinguish "outside Scope" (fix by adding the deck) from "no field
-    mapping" (fix by configuring fields) — the v1.2 dialog must never
-    offer "Add deck" for a mapping problem, which looped forever.
+    (explicit + inferred both failed). The name is kept for backward
+    compatibility (tests import it indirectly via resolve_fields_for_note).
     """
     targets = config.get("targets")
     if isinstance(targets, dict) and targets:
@@ -213,14 +209,11 @@ def _resolve_mapping_for_inscope_note(note, config: Dict[str, Any]) -> Optional[
         # No entry for this type → infer.
         return _infer_field_mapping(note)
 
-    # Legacy single-type config: applies only to that one type.
+    # Legacy single-type config: applies only to that one type; any
+    # other type falls back to inference (no Scope involved).
     legacy_type = str(config.get("note_type", "") or "").strip()
     if legacy_type and _get_note_type_name(note) != legacy_type:
-        # Legacy gate failed but Scope already passed — allow inference
-        # for any in-scope type when a Scope is configured.
-        if isinstance(config.get("scope_decks"), list) and config.get("scope_decks"):
-            return _infer_field_mapping(note)
-        return None
+        return _infer_field_mapping(note)
     resolved = {
         "word_field": str(config.get("word_field", "") or ""),
         "reading_field": str(config.get("reading_field", "") or ""),
@@ -234,23 +227,15 @@ def _resolve_mapping_for_inscope_note(note, config: Dict[str, Any]) -> Optional[
 def resolve_fields_for_note(note, config: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """
     Returns {'word_field', 'reading_field', 'definition_field'} for this
-    note, or None when the note must not generate.
+    note, or None when no usable mapping exists.
 
-    Field mapping still comes from the note's own type (multi-type
-    'targets' when configured, legacy single-type otherwise), but
-    membership is decided by the Scope: the note must have a card in
-    one of the selected Scope decks (ANY card suffices — a note with
-    cards in several decks is in scope when at least one is covered;
-    the user never needs to add every deck it touches).
-
-    If the note is inside the Scope but has no explicit entry in
-    `targets`, an auto-inferred mapping is returned so that selecting a
-    deck alone is enough — the "no need to add each note type" promise.
+    Field mapping comes from the note's own type (multi-type 'targets'
+    when configured, legacy single-type otherwise), falling back to
+    auto-inference — picking a deck is never required. Deck Scope does
+    NOT gate generation: it bounds only the learner-knowledge snapshot
+    (kanji/vocab scoring weights). Generation itself is governed by the
+    global CD toggle (`tab_generate`) + Tab, Chinese-Support style.
     """
-    # Scope gate first: deck membership is the primary filter. The editor
-    # instance enables Add-window (unsaved note) deck resolution.
-    if not _note_in_scope(note, config, editor=getattr(note, "_cd_editor", None)):
-        return None
     return _resolve_mapping_for_inscope_note(note, config)
 
 
@@ -274,214 +259,63 @@ def _resolve_editor_note(editor) -> Optional[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Single-note generation (editor toolbar button)
+# Single-note generation (editor toolbar button + Tab-to-Generate)
 # ---------------------------------------------------------------------------
 
 _generation_in_flight = set()  # note ids currently being generated
 
 
-def _add_deck_to_scope_and_reset(deck_names: List[str]) -> bool:
-    """Appends decks to the Scope config and rebuilds knowledge.
-
-    Shared by the quick-fix dialog and the Add-window path. Returns
-    True on success. Also drops the generator singleton so the next
-    generation re-scores against the NEW knowledge (the v1.1.4 "add
-    deck does not fix it" contributor: the generator kept the stale
-    snapshot). Never raises.
+def _offer_mapping_fix(note, editor) -> None:
     """
-    try:
-        addon = _get_addon_name()
-        cfg = mw.addonManager.getConfig(addon) or {}
-        old_scope = list(cfg.get(_SCOPE_KEY) or [])
-        new_scope = list(old_scope)
-        for d in deck_names:
-            if d and d not in new_scope:
-                new_scope.append(d)
-        if new_scope == old_scope:
-            # Nothing changed — still reset the generator, since the
-            # caller expects a behavior change (idempotent safety).
-            pass
-        cfg[_SCOPE_KEY] = new_scope
-        mw.addonManager.writeConfig(addon, cfg)
-        print(f"CompreDef: quick-fix added deck(s) {deck_names} to Scope "
-              f"(now: {new_scope})")
-        # Knowledge must rebuild for the new deck to count, and the
-        # generator must drop its stale knowledge snapshot.
-        try:
-            from .core import reset_generator as _reset_gen
-        except Exception:
-            try:
-                from core import reset_generator as _reset_gen  # type: ignore
-            except Exception:
-                _reset_gen = None
-        if _reset_gen is not None:
-            try:
-                _reset_gen()
-            except Exception:
-                pass
-        else:
-            # Last resort: reset knowledge caches directly. The SYNCHRONOUS
-            # variant is used because callers may run on background
-            # threads (generation retry); taskman is main-thread-only.
-            try:
-                if __package__:
-                    from .anki import sync_reset_caches as _reset
-                else:
-                    from anki import sync_reset_caches as _reset  # type: ignore
-                if _reset:
-                    _reset()
-            except Exception:
-                pass
-        return True
-    except Exception:
-        print(f"CompreDef: add-to-scope failed:\n{traceback.format_exc()}")
-        return False
-
-
-def _target_deck_for_note(note, editor) -> str:
-    """Resolves the deck a NEW (unsaved) note will land in.
-
-    Saved notes: their own card decks. Add-window notes (id 0, no
-    cards): the window's selected deck — via its DeckChooser when
-    reachable, else the collection's 'curDeck' (the same default
-    Anki's own Add window uses). Returns '' when unknowable.
+    Mapping-failure dialog: the note's type could not be mapped to
+    word/definition fields, so generation cannot proceed. Offers a
+    one-click jump to the Fields tab. Deck Scope is never the cause —
+    generation bypasses Scope by design (Scope bounds only knowledge).
     """
-    # Saved note: its cards' decks.
-    try:
-        decks = _scope_note_deck_names(note)
-        if decks:
-            return decks[0]
-    except Exception:
-        pass
-    # Unsaved note: the Add window's deck chooser.
-    try:
-        chooser = getattr(editor, "deck_chooser", None) or \
-            getattr(getattr(editor, "parentWindow", None), "deck_chooser", None)
-        did = getattr(chooser, "selected_deck_id", None)
-        if did and mw and mw.col:
-            name = mw.col.decks.name(int(did))
-            if name and name != "(none)":
-                return name
-    except Exception:
-        pass
-    # Fallback: collection's current deck (Anki's own Add default).
-    try:
-        if mw and mw.col:
-            did = mw.col.get_config("curDeck", default=None)
-            if did:
-                name = mw.col.decks.name(int(did))
-                if name and name != "(none)":
-                    return name
-    except Exception:
-        pass
-    return ""
-
-
-def _offer_add_to_scope(note, editor) -> None:
-    """
-    Out-of-scope quick fix: explains WHY the note is blocked (which of
-    its decks are covered vs not — ANY coverage suffices) and offers a
-    one-click "add this deck & retry".
-
-    v1.2 hardening: when the Scope ALREADY covers one of the note's
-    decks but generation still failed, the cause is a field-mapping
-    problem, not scope — offering "Add deck" there looped forever (the
-    user's report). That case now gets a mapping-specific message and
-    NEVER the add-deck button.
-    """
-    # Re-check precisely: is scope the actual blocker, or mapping?
-    cfg = _get_addon_config() if mw else {}
-    in_scope = _note_in_scope(note, cfg, editor=getattr(note, "_cd_editor", None))
-    note_decks = _scope_note_deck_names(note)
-    if not note_decks:
-        target = _target_deck_for_note(note, editor)
-        if target:
-            note_decks = [target]
-    scope = list(cfg.get(_SCOPE_KEY) or [])
-    scope_txt = ", ".join(scope) if scope else "(none)"
-
-    if in_scope:
-        # Scope passes but the caller landed here → mapping failure.
-        type_name = _get_note_type_name(note)
-        fields = list(note.keys()) if note is not None else []
-        msg = (
-            f"This note's type could not be mapped to word/definition "
-            f"fields:\n\nNote type: {type_name}\n"
-            f"Fields: {', '.join(fields[:8])}{' …' if len(fields) > 8 else ''}\n\n"
-            f"Map it under Tools → CompreDef Configuration → Fields."
-        )
-        try:
-            from aqt.utils import askUserDialog  # type: ignore
-            diag = askUserDialog(
-                msg, ["Open Configuration…", "Cancel"],
-                parent=editor.parentWindow if editor is not None else None,
-                title="CompreDef — field mapping needed",
-            )
-            if diag.run() == "Open Configuration…":
-                try:
-                    from .gui import show_config_dialog
-                except Exception:
-                    from gui import show_config_dialog  # type: ignore
-                # Fields tab is index 1 (Scope=0, Fields=1).
-                show_config_dialog(initial_tab=1)
-        except Exception:
-            tooltip(msg, parent=editor.parentWindow if editor else None)
-        return
-
-    deck_txt = ", ".join(note_decks) if note_decks else "(unknown — no cards yet)"
+    type_name = _get_note_type_name(note)
+    fields = list(note.keys()) if note is not None else []
     msg = (
-        f"This note is outside the CompreDef Scope:\n\n"
-        f"Note is in: {deck_txt}\n"
-        f"Scope covers: {scope_txt}\n\n"
-        f"Add this deck to the Scope and generate now?\n"
-        f"(A note only needs ONE of its decks in the Scope.)"
+        f"This note's type could not be mapped to word/definition "
+        f"fields:\n\nNote type: {type_name}\n"
+        f"Fields: {', '.join(fields[:8])}{' …' if len(fields) > 8 else ''}\n\n"
+        f"Map it under Tools → CompreDef Configuration → Fields."
     )
     try:
         from aqt.utils import askUserDialog  # type: ignore
-        btns = ["Add deck & Generate", "Open Scope…", "Cancel"]
-        parent_w = editor.parentWindow if editor is not None else None
-        diag = askUserDialog(msg, btns, parent=parent_w,
-                              title="CompreDef — outside Scope")
-        # ButtonedDialog.run() returns the clicked button's string.
-        result = diag.run()
-    except Exception:
-        # Cross-version fallback: plain tooltip with guidance.
-        tooltip(
-            f"CompreDef: note deck ({deck_txt}) is outside the Scope ({scope_txt}).\n"
-            "Add the deck via Tools → CompreDef Scope.",
-            parent=editor.parentWindow if editor else None,
+        diag = askUserDialog(
+            msg, ["Open Configuration…", "Cancel"],
+            parent=editor.parentWindow if editor is not None else None,
+            title="CompreDef — field mapping needed",
         )
-        return
+        if diag.run() == "Open Configuration…":
+            try:
+                from .gui import show_config_dialog
+            except Exception:
+                from gui import show_config_dialog  # type: ignore
+            # Fields tab is index 1 (Scope=0, Fields=1).
+            show_config_dialog(initial_tab=1)
+    except Exception:
+        tooltip(msg, parent=editor.parentWindow if editor else None)
 
-    if result == "Add deck & Generate":
-        if not note_decks:
-            # No deck resolvable (deeply headless?): open the picker so
-            # the user can fix it manually instead of a silent no-op.
-            tooltip(
-                "CompreDef: could not determine this note's deck.\n"
-                "Pick decks manually via Tools → CompreDef Scope.",
-                parent=editor.parentWindow if editor else None,
-            )
-            return
-        if _add_deck_to_scope_and_reset(note_decks):
-            # Retry generation with the updated config + fresh knowledge.
-            on_editor_generate_definition(editor)
-    elif result == "Open Scope…":
-        try:
-            from .gui import show_scope_dialog
-        except Exception:
-            from gui import show_scope_dialog  # type: ignore
-        show_scope_dialog()
+
+# Backwards-compatibility alias: older code/tests referenced the
+# Scope quick-fix by name. Generation no longer consults Scope, so it
+# always shows the mapping dialog.
+_offer_add_to_scope = _offer_mapping_fix
 
 
 def on_editor_generate_definition(editor) -> None:
     """
-    Action callback triggered when user clicks the CompreDef editor toolbar button.
+    Fill-empty generation for the current note (toolbar toggle ON path
+    and Tab-to-Generate share it, so the two can never diverge).
 
     Extracts the target word from the configured field and updates the
-    definition field asynchronously. The heavy dictionary work is a set of
-    SQLite SELECTs against pre-built indexes (see parser.py), so this is
-    a lightweight background query — it never parses dictionary files.
+    definition field asynchronously — but ONLY when the definition field
+    is empty. Existing content is never overwritten (Chinese-Support
+    rule): clear the field first to regenerate, or use Browser bulk for
+    deliberate overwrites. The heavy dictionary work is a set of SQLite
+    SELECTs against pre-built indexes (see parser.py) — it never parses
+    dictionary files. Deck Scope is not consulted (knowledge-only).
     """
     note = _resolve_editor_note(editor)
     if note is None:
@@ -500,13 +334,12 @@ def on_editor_generate_definition(editor) -> None:
     dictionary_folder = config.get("dictionary_folder", "")
 
     # Field mapping comes from the note's own type (multi-type 'targets'
-    # when configured, legacy single-type otherwise). The Scope gate
-    # decides membership; when it blocks, the quick-fix dialog explains
-    # the deck mismatch and can add the deck on the spot. Mapping-only
-    # failures (scope passes) get the mapping dialog instead.
+    # when configured, legacy single-type otherwise), with auto-inference
+    # as fallback. Unmappable types get the mapping dialog — Scope is
+    # never the cause (generation bypasses it by design).
     fields = resolve_fields_for_note(note, config)
     if fields is None:
-        _offer_add_to_scope(note, editor)
+        _offer_mapping_fix(note, editor)
         return
     word_field = fields["word_field"]
     reading_field = fields["reading_field"]
@@ -520,6 +353,20 @@ def on_editor_generate_definition(editor) -> None:
     if def_field not in note:
         tooltip(f"Definition field '{def_field}' not found on current note.", parent=editor.parentWindow)
         return
+
+    # Never overwrite: Tab and the toolbar toggle fill EMPTY definitions
+    # only (Chinese-Support rule). An untouched legacy-editor field ships
+    # as "<br>" HTML, so emptiness is judged on cleaned text.
+    try:
+        if extract_clean_word(note[def_field]):
+            tooltip(
+                "CompreDef: definition already filled — left untouched. "
+                "Clear it first to regenerate (or use Browser bulk).",
+                parent=editor.parentWindow,
+            )
+            return
+    except Exception:
+        pass
 
     # Anki note fields frequently carry HTML wrappers (<div>, <span>) and
     # furigana markup (先[ま]ず / <ruby>先<rt>ま</rt></ruby>ず). The raw
@@ -732,6 +579,13 @@ def _register_editor(editor) -> None:
         pass
     if editor not in _live_editors:
         _live_editors.append(editor)
+    # New/loaded note: the toolbar toggle must show the CURRENT global
+    # state (buttons are created once per editor with a stale-at birth
+    # tooltip/class). Sync is best-effort — test fakes have no webview.
+    try:
+        _sync_toggle_visual(editor)
+    except Exception:
+        pass
 
 
 def _find_editor_for_note(note) -> Optional[Any]:
@@ -784,22 +638,19 @@ def _should_auto_generate(note, unfocused_field: str, config: Dict[str, Any],
     `unfocused_field` on `note` should kick off automatic generation.
 
     Conditions (all must hold):
-    - The feature is enabled in config.
-    - The note is inside the Scope (deck membership, ANY card suffices).
+    - The feature is enabled in config (the global CD toggle).
     - The unfocused field IS the word field — from the note type's
       explicit `targets` entry, its legacy config, or auto-inference
       (same resolver as the toolbar button; v1.2.1).
     - The definition field exists and is empty (never overwrite existing
-      content — explicit regeneration stays available via the toolbar
-      button).
+      content — regeneration stays available via Browser bulk, or by
+      clearing the field first).
+
+    Deck Scope is deliberately NOT consulted: Scope bounds only the
+    learner-knowledge snapshot (scoring weights), never whether a card
+    may generate.
     """
     if not _tab_generate_enabled(config):
-        return False
-
-    # Scope gate first: out-of-scope notes never auto-generate (this
-    # covers both the empty-scope state and notes in other decks).
-    # editor enables Add-window deck resolution for unsaved notes.
-    if not _note_in_scope(note, config, editor=editor):
         return False
 
     # Multi-type mode: only fire when the note's type is a configured
@@ -825,17 +676,14 @@ def _should_auto_generate(note, unfocused_field: str, config: Dict[str, Any],
         # Legacy single-type config
         legacy_type = str(config.get("note_type", "") or "").strip()
         if legacy_type and _get_note_type_name(note) != legacy_type:
-            # Same tolerance as the button path: an in-scope note of a
-            # different type still generates when fields can be inferred
+            # Same tolerance as the button path: a note of a different
+            # type still generates when fields can be inferred
             # (resolve_fields_for_note does exactly this).
-            if isinstance(config.get("scope_decks"), list) and config.get("scope_decks"):
-                inferred = _infer_field_mapping(note)
-                if not inferred:
-                    return False
-                word_field = inferred["word_field"]
-                def_field = inferred["definition_field"]
-            else:
+            inferred = _infer_field_mapping(note)
+            if not inferred:
                 return False
+            word_field = inferred["word_field"]
+            def_field = inferred["definition_field"]
         else:
             word_field = config.get("word_field", "")
             def_field = config.get("definition_field", "")
@@ -896,11 +744,10 @@ def on_field_unfocus(changed: bool, note, current_field_index: int) -> bool:
             # do nothing rather than guess at a window like the old code.
             return changed
 
-        # Reuse the exact same generation path as the toolbar button
-        # (validation, single-flight guard, background thread, safe
-        # persistence) so Tab and button can never diverge in behaviour.
-        # The editor is attached to the note so resolve_fields_for_note
-        # can resolve the Add window's deck for unsaved notes.
+        # Reuse the exact same generation path as the toolbar toggle
+        # (validation, fill-empty guard, single-flight guard, background
+        # thread, safe persistence) so Tab and toggle can never diverge
+        # in behaviour.
         try:
             note._cd_editor = editor  # type: ignore[attr-defined]
         except Exception:
@@ -959,25 +806,122 @@ def _field_name_at(note, index: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Editor toolbar button
+# Editor toolbar toggle (Chinese-Support style)
 # ---------------------------------------------------------------------------
+
+_TOGGLE_BUTTON_ID = "compredef_editor_btn"
+
+
+def _toggle_tip(enabled: bool) -> str:
+    """Tooltip text for the toolbar toggle in each state."""
+    if enabled:
+        return ("CompreDef auto-generate ON — leaving the word field (Tab) "
+                "fills an empty Definition (never overwrites). "
+                "Click to turn OFF.")
+    return ("CompreDef auto-generate OFF — Tab does nothing. "
+            "Click to turn ON (Tab then fills empty Definitions).")
+
+
+def _set_toggle_visual(editor, enabled: bool) -> None:
+    """Reflects the toggle state on one editor's toolbar button.
+
+    Toggleable editor buttons carry the `active` class when on (Anki's
+    own `toggleEditorButton` flips it on click); the config is the
+    source of truth, so after every flip and on every note load we set
+    the class explicitly to match. Never raises (headless/test editors
+    have no webview).
+    """
+    try:
+        web = getattr(editor, "web", None)
+        if web is None or not hasattr(web, "eval"):
+            return
+        state = "true" if enabled else "false"
+        web.eval(
+            "(function(){var b=document.getElementById("
+            f"{json.dumps(_TOGGLE_BUTTON_ID)});"
+            f"if(b){{b.classList.toggle('active',{state});"
+            f"b.title={json.dumps(_toggle_tip(enabled))};}}}})();"
+        )
+    except Exception:
+        pass
+
+
+def _sync_toggle_visual(editor) -> None:
+    """Sets one editor's button to the current config state."""
+    try:
+        cfg = _get_addon_config()
+    except Exception:
+        cfg = {}
+    try:
+        _set_toggle_visual(editor, _tab_generate_enabled(cfg))
+    except Exception:
+        pass
+
+
+def on_toggle_cd_button(editor) -> None:
+    """
+    Toolbar toggle callback (Chinese-Support `toggleButtonClick`).
+
+    Flips the global `tab_generate` flag, persists it, syncs the visual
+    state on every live editor, and — when turning ON — immediately
+    attempts a fill-empty generation for the current note so a single
+    click both enables and fills (never overwrites: clear the field
+    first to regenerate, or use Browser bulk).
+    """
+    try:
+        addon = _get_addon_name()
+        cfg = mw.addonManager.getConfig(addon) or {} if mw else {}
+    except Exception:
+        cfg, addon = {}, None
+    new_state = not _tab_generate_enabled(cfg)
+    try:
+        if mw and addon:
+            cfg["tab_generate"] = new_state
+            mw.addonManager.writeConfig(addon, cfg)
+    except Exception:
+        print(f"CompreDef: toggle persist failed:\n{traceback.format_exc()}")
+    for ed in list(_live_editors):
+        _set_toggle_visual(ed, new_state)
+    _set_toggle_visual(editor, new_state)
+    try:
+        tooltip(
+            f"CompreDef auto-generate {'ON' if new_state else 'OFF'}"
+            + (" — Tab now fills empty Definitions." if new_state else "."),
+            parent=editor.parentWindow if editor is not None else None,
+        )
+    except Exception:
+        pass
+    if new_state:
+        try:
+            on_editor_generate_definition(editor)
+        except Exception:
+            print(f"CompreDef: toggle-on generate failed:\n{traceback.format_exc()}")
+
 
 def add_editor_button(buttons: List[str], editor) -> None:
     """
-    Hook callback to append the CompreDef button to the card editor toolbar.
+    Hook callback to append the CompreDef toggle to the editor toolbar.
 
-    `editor_did_init_buttons` fires for BOTH editor generations and
+    Chinese-Support style: a single `toggleable` button whose `active`
+    class shows the global auto-generate state. Clicking flips the
+    state (persisted `tab_generate`); Tab fills empty definitions while
+    ON. `editor_did_init_buttons` fires for BOTH editor generations and
     `addButton` exists on both, so one registration covers everything.
     """
     icon_path = os.path.join(os.path.dirname(__file__), "icons", "compredef.svg")
+    try:
+        enabled = _tab_generate_enabled(_get_addon_config())
+    except Exception:
+        enabled = True
 
     btn = editor.addButton(
         icon=icon_path if os.path.exists(icon_path) else None,
-        cmd="compredef_generate_definition",
-        func=lambda ed: on_editor_generate_definition(ed),
-        tip="Generate CompreDef Definition",
+        cmd="compredef_toggle_autogen",
+        func=lambda ed: on_toggle_cd_button(ed),
+        tip=_toggle_tip(enabled),
         label="CD",
-        id="compredef_editor_btn",
+        id=_TOGGLE_BUTTON_ID,
+        toggleable=True,
     )
     buttons.append(btn)
 
@@ -991,7 +935,10 @@ def on_bulk_generate_definitions(browser: Browser) -> None:
     Action callback triggered from Browser Edit menu or Context menu.
 
     Processes all selected notes in a background thread, updating definition
-    fields. Failures are logged with note id, word and traceback, reported
+    fields. This is the DELIBERATE regenerate path: unlike Tab and the
+    editor toggle (which never touch a filled definition), bulk MAY
+    overwrite existing definitions for the notes the user selected.
+    Failures are logged with note id, word and traceback, reported
     to the user in the summary, and never abort the remaining notes.
     """
     # selected_notes() is the modern name; selectedNotes() the legacy one

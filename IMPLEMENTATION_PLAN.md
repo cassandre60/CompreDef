@@ -74,7 +74,13 @@ T11 covers all (release)
 
 ## Backlog
 
-Empty. All 15 slices shipped; new work enters here per request.
+- **T16 — Chinese-Support-style toggle + knowledge-only Scope (NEW).**
+  Single toggleable CD toolbar button (`toggleable`, active class
+  mirrors global `tab_generate`); Tab fills empty definitions only and
+  never consults Scope; editor generation never overwrites (Browser
+  bulk stays the explicit overwrite path); Scope bounds knowledge
+  only; fresh installs auto-preselect Japanese decks once
+  (name + kana heuristic, never re-seeds a deliberate Clear).
 
 ## Working agreements (from experience)
 

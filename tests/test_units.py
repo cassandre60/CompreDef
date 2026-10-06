@@ -261,6 +261,21 @@ def test_is_scope_empty() -> None:
           ie({"scope_decks": ["A"]}) is False)
 
 
+def test_is_japanese_deck_name() -> None:
+    """scope.is_japanese_deck_name: fresh-install guess, name pass (pure)."""
+    f = compredef_scope.is_japanese_deck_name
+    check("unit: Japanese name matches",
+          f("Japanese") is True)
+    check("unit: 日本語 name matches",
+          f("My 日本語 deck") is True)
+    check("unit: keyword Tango matches",
+          f("Tango N5") is True)
+    check("unit: French name misses",
+          f("French") is False)
+    check("unit: empty/None miss",
+          f("") is False and f(None) is False)
+
+
 def test_note_type_name() -> None:
     """scope._note_type_name: tolerant name extraction with a bare
     stand-in (gap: only covered via full FakeNote fixtures)."""
@@ -545,6 +560,7 @@ def main() -> int:
         test_expand_scope_names()
         test_missing_scope_decks()
         test_is_scope_empty()
+        test_is_japanese_deck_name()
         test_note_type_name()
         test_models_dataclasses()
         test_style_to_css()
