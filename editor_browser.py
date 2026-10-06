@@ -822,14 +822,24 @@ def _toggle_tip(enabled: bool) -> str:
             "Click to turn ON (Tab then fills empty Definitions).")
 
 
+def _toggle_label(enabled: bool) -> str:
+    """Toolbar text mirroring Chinese Support's ✓/✕ 汉子 switch.
+
+    The `active` class alone is too subtle in Anki's toolbar — the
+    label itself must say the state, exactly like Chinese Support's
+    `toggleButton.setText("✓ 汉子" / "✕ 汉子")`.
+    """
+    return "✓ CD" if enabled else "✕ CD"
+
+
 def _set_toggle_visual(editor, enabled: bool) -> None:
     """Reflects the toggle state on one editor's toolbar button.
 
-    Toggleable editor buttons carry the `active` class when on (Anki's
-    own `toggleEditorButton` flips it on click); the config is the
-    source of truth, so after every flip and on every note load we set
-    the class explicitly to match. Never raises (headless/test editors
-    have no webview).
+    Sets the `active` class, the tooltip, AND the label text itself
+    (✓ CD / ✕ CD — the state must be readable at a glance, like
+    Chinese Support). The config is the source of truth, so after
+    every flip and on every note load the button is set explicitly to
+    match. Never raises (headless/test editors have no webview).
     """
     try:
         web = getattr(editor, "web", None)
@@ -839,8 +849,15 @@ def _set_toggle_visual(editor, enabled: bool) -> None:
         web.eval(
             "(function(){var b=document.getElementById("
             f"{json.dumps(_TOGGLE_BUTTON_ID)});"
-            f"if(b){{b.classList.toggle('active',{state});"
-            f"b.title={json.dumps(_toggle_tip(enabled))};}}}})();"
+            "if(!b){return;}"
+            f"b.classList.toggle('active',{state});"
+            f"b.title={json.dumps(_toggle_tip(enabled))};"
+            f"var t={json.dumps(_toggle_label(enabled))};"
+            "for(var i=0;i<b.childNodes.length;i++){"
+            "var n=b.childNodes[i];"
+            "if(n.nodeType===3&&n.textContent.trim().length>0)"
+            "{n.textContent=' '+t;break;}"
+            "}})();"
         )
     except Exception:
         pass
@@ -919,7 +936,7 @@ def add_editor_button(buttons: List[str], editor) -> None:
         cmd="compredef_toggle_autogen",
         func=lambda ed: on_toggle_cd_button(ed),
         tip=_toggle_tip(enabled),
-        label="CD",
+        label=_toggle_label(enabled),
         id=_TOGGLE_BUTTON_ID,
         toggleable=True,
     )

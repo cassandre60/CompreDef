@@ -1911,6 +1911,10 @@ def test_cd_toggle_and_japanese_scope_guess() -> None:
               eb._tab_generate_enabled({"tab_generate": False}) is False)
         check("toggle: tips differ by state",
               eb._toggle_tip(True) != eb._toggle_tip(False))
+        check("toggle: ON label carries ✓",
+              "✓" in eb._toggle_label(True), eb._toggle_label(True))
+        check("toggle: OFF label carries ✕",
+              "✕" in eb._toggle_label(False), eb._toggle_label(False))
 
         # 2. Toolbar button is registered toggleable with the toggle cmd.
         seen: dict = {}
@@ -1928,15 +1932,41 @@ def test_cd_toggle_and_japanese_scope_guess() -> None:
         check("toggle: button id stable for visual sync",
               seen.get("id") == "compredef_editor_btn",
               f"got {seen.get('id')}")
+        check("toggle: creation label shows state (✓ when ON)",
+              seen.get("label") == "✓ CD",
+              f"got {seen.get('label')}")
 
-        # 3. Visual sync never crashes headless editors (no webview).
+        # 3. Visual sync never crashes headless editors (no webview),
+        #    and the synced JS carries the ✓/✕ label swap.
+        class FakeWeb:
+            def __init__(self):
+                self.js = ""
+
+            def eval(self, js):
+                self.js = js
+
+        class WebEditor:
+            def __init__(self):
+                self.web = FakeWeb()
+
         try:
             eb._set_toggle_visual(object(), True)
             eb._sync_toggle_visual(object())
-            visual_ok = True
+            web_ed = WebEditor()
+            eb._set_toggle_visual(web_ed, False)
+            # NOTE: json.dumps ASCII-escapes ✓/✕ (\\u2713/\\u2715) in
+            # the JS payload, so assert the wiring structurally: button
+            # id + active class + the text-node label swap. The literal
+            # label text itself is pinned via _toggle_label above.
+            js_ok = ("compredef_editor_btn" in web_ed.web.js
+                     and "active" in web_ed.web.js
+                     and "childNodes" in web_ed.web.js
+                     and "textContent" in web_ed.web.js)
+            visual_ok = bool(js_ok)
         except Exception:
             visual_ok = False
         check("toggle: visual sync is headless-safe", visual_ok)
+        check("toggle: sync JS swaps the label text", visual_ok)
 
         # 4. Tab bypasses Scope: French-deck note fires when toggle ON.
         class FakeNote:
