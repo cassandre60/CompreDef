@@ -823,23 +823,23 @@ def _toggle_tip(enabled: bool) -> str:
 
 
 def _toggle_label(enabled: bool) -> str:
-    """Toolbar text mirroring Chinese Support's ✓/✕ 汉子 switch.
+    """Toolbar text, copied from Chinese Support's switch verbatim.
 
-    The `active` class alone is too subtle in Anki's toolbar — the
-    label itself must say the state, exactly like Chinese Support's
-    `toggleButton.setText("✓ 汉子" / "✕ 汉子")`.
+    Chinese Support shows `✓ 汉子` / `✕ 汉子` (checkmark + the language
+    word) — so this shows `✓ 日本語` / `✕ 日本語`. No invented wording.
     """
-    return "✓ CD" if enabled else "✕ CD"
+    return "✓ 日本語" if enabled else "✕ 日本語"
 
 
 def _set_toggle_visual(editor, enabled: bool) -> None:
     """Reflects the toggle state on one editor's toolbar button.
 
     Sets the `active` class, the tooltip, AND the label text itself
-    (✓ CD / ✕ CD — the state must be readable at a glance, like
-    Chinese Support). The config is the source of truth, so after
-    every flip and on every note load the button is set explicitly to
-    match. Never raises (headless/test editors have no webview).
+    (✓ 日本語 / ✕ 日本語 — the state must be readable at a glance,
+    exactly like Chinese Support). The config is the source of truth,
+    so after every flip and on every note load the button is set
+    explicitly to match. Never raises (headless/test editors have no
+    webview).
     """
     try:
         web = getattr(editor, "web", None)

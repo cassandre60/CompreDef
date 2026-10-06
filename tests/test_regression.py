@@ -1915,6 +1915,9 @@ def test_cd_toggle_and_japanese_scope_guess() -> None:
               "✓" in eb._toggle_label(True), eb._toggle_label(True))
         check("toggle: OFF label carries ✕",
               "✕" in eb._toggle_label(False), eb._toggle_label(False))
+        check("toggle: label is the language word, like Chinese Support",
+              eb._toggle_label(True) == "✓ 日本語"
+              and eb._toggle_label(False) == "✕ 日本語")
 
         # 2. Toolbar button is registered toggleable with the toggle cmd.
         seen: dict = {}
@@ -1933,7 +1936,7 @@ def test_cd_toggle_and_japanese_scope_guess() -> None:
               seen.get("id") == "compredef_editor_btn",
               f"got {seen.get('id')}")
         check("toggle: creation label shows state (✓ when ON)",
-              seen.get("label") == "✓ CD",
+              seen.get("label") == "✓ 日本語",
               f"got {seen.get('label')}")
 
         # 3. Visual sync never crashes headless editors (no webview),
