@@ -822,24 +822,15 @@ def _toggle_tip(enabled: bool) -> str:
             "Click to turn ON (Tab then fills empty Definitions).")
 
 
-def _toggle_label(enabled: bool) -> str:
-    """Toolbar text, copied from Chinese Support's switch verbatim.
-
-    Chinese Support shows `✓ 汉子` / `✕ 汉子` (checkmark + the language
-    word) — so this shows `✓ 日本語` / `✕ 日本語`. No invented wording.
-    """
-    return "✓ 日本語" if enabled else "✕ 日本語"
-
-
 def _set_toggle_visual(editor, enabled: bool) -> None:
     """Reflects the toggle state on one editor's toolbar button.
 
-    Sets the `active` class, the tooltip, AND the label text itself
-    (✓ 日本語 / ✕ 日本語 — the state must be readable at a glance,
-    exactly like Chinese Support). The config is the source of truth,
-    so after every flip and on every note load the button is set
-    explicitly to match. Never raises (headless/test editors have no
-    webview).
+    The button is `toggleable`, so Anki's own toolbar UI flips the
+    pressed (`active`) look on click — the click is handled by the UI,
+    no tick character is ever added to the text. The config is the
+    source of truth, so after every flip and on every note load the
+    pressed state + tooltip are set explicitly to match. Never raises
+    (headless/test editors have no webview).
     """
     try:
         web = getattr(editor, "web", None)
@@ -852,12 +843,7 @@ def _set_toggle_visual(editor, enabled: bool) -> None:
             "if(!b){return;}"
             f"b.classList.toggle('active',{state});"
             f"b.title={json.dumps(_toggle_tip(enabled))};"
-            f"var t={json.dumps(_toggle_label(enabled))};"
-            "for(var i=0;i<b.childNodes.length;i++){"
-            "var n=b.childNodes[i];"
-            "if(n.nodeType===3&&n.textContent.trim().length>0)"
-            "{n.textContent=' '+t;break;}"
-            "}})();"
+            "})();"
         )
     except Exception:
         pass
@@ -936,7 +922,7 @@ def add_editor_button(buttons: List[str], editor) -> None:
         cmd="compredef_toggle_autogen",
         func=lambda ed: on_toggle_cd_button(ed),
         tip=_toggle_tip(enabled),
-        label=_toggle_label(enabled),
+        label="CD",
         id=_TOGGLE_BUTTON_ID,
         toggleable=True,
     )
