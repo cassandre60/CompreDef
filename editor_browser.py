@@ -59,7 +59,7 @@ from aqt.qt import QMenu, QKeySequence
 from aqt.utils import tooltip
 
 from .core import get_generator
-from .utils import parse_furigana_field, extract_clean_word, resolve_dictionary_paths
+from .utils import parse_furigana_field, extract_clean_word, resolve_dictionary_paths, field_is_effectively_empty
 
 # Dual-context sibling import (see core.py for why both forms are needed).
 if __package__:
@@ -355,10 +355,11 @@ def on_editor_generate_definition(editor) -> None:
         return
 
     # Never overwrite: Tab and the toolbar toggle fill EMPTY definitions
-    # only (Chinese-Support rule). An untouched legacy-editor field ships
-    # as "<br>" HTML, so emptiness is judged on cleaned text.
+    # only (Chinese-Support rule). Emptiness must count "<br>" as empty but
+    # treat embedded media as content — otherwise "<br><img ...>" (a real
+    # user image) would look blank and get overwritten.
     try:
-        if extract_clean_word(note[def_field]):
+        if not field_is_effectively_empty(note[def_field]):
             tooltip(
                 "CompreDef: definition already filled — left untouched. "
                 "Clear it first to regenerate (or use Browser bulk).",
@@ -705,11 +706,12 @@ def _should_auto_generate(note, unfocused_field: str, config: Dict[str, Any],
     # Only auto-fill EMPTY definition fields. A never-edited field in the
     # legacy editor ships as "<br>" / "<div><br></div>" HTML rather than
     # "" — plain .strip() sees it as non-empty and blocks generation.
-    # extract_clean_word strips tags + entities, so HTML emptiness counts
-    # as empty (matches the downstream generation path's cleaning). This
-    # was the Browser bug: 不公平 in Expression + Tab left Definition
-    # as "<br>", so Tab silently did nothing despite the setting.
-    return not extract_clean_word(note[def_field])
+    # field_is_effectively_empty treats "<br>"-only HTML as empty but
+    # keeps media (<img> etc.) as content, so an existing user image is
+    # never silently overwritten (お好み焼き bug). This was the Browser
+    # bug: 不公平 in Expression + Tab left Definition as "<br>", so Tab
+    # silently did nothing despite the setting.
+    return field_is_effectively_empty(note[def_field])
 
 
 def on_field_unfocus(changed: bool, note, current_field_index: int) -> bool:

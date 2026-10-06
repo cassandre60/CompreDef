@@ -1448,6 +1448,24 @@ def test_tab_generate_decisions() -> None:
         eb._should_auto_generate(note_ws, "Expression", base_config),
     )
 
+    # 3b. A definition of only "<img>" (user image, no text) is NOT empty —
+    #     Tab must never overwrite it (お好み焼き bug: "<br><img ...>"
+    #     looked blank to the tag-stripping emptiness check).
+    note_img = FakeNote({"Expression": "お好み焼き",
+                         "Definition": '<br><img alt="お好み焼き" src="images-xyz.webp">'})
+    check(
+        "tab: def with only <img> never auto-overwritten",
+        not eb._should_auto_generate(note_img, "Expression", base_config),
+    )
+
+    # 3c. An "empty-looking" HTML skeleton still counts as empty.
+    note_skeleton = FakeNote({"Expression": "試験",
+                              "Definition": "<div><br></div>&nbsp;"})
+    check(
+        "tab: <div><br></div> skeleton counts as empty",
+        eb._should_auto_generate(note_skeleton, "Expression", base_config),
+    )
+
     # 4. Blurring a NON-word field must not fire.
     check(
         "tab: non-word-field unfocus does nothing",
@@ -2834,7 +2852,8 @@ def test_package_relative_imports() -> None:
                       "is_scope_empty", "note_deck_names",
                       "resolve_deck_for_note"],
             "utils": ["extract_clean_word", "extract_base_text",
-                      "parse_furigana_field", "resolve_dictionary_paths"],
+                      "parse_furigana_field", "resolve_dictionary_paths",
+                      "field_is_effectively_empty"],
             "parser": ["get_single_dictionary", "RENDERER_VERSION",
                        "parse_furigana_field"],
             "generator": ["generate_definition"],

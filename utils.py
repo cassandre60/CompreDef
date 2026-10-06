@@ -17,6 +17,34 @@ def extract_base_text(html_or_text: str) -> str:
     plain = _TAG_RE.sub("", no_rp)
     return html.unescape(plain).strip()
 
+def field_is_effectively_empty(field_html: str) -> bool:
+    """True when a note field has no visible content.
+
+    An untouched legacy-editor field ships as "<br>" / "<div><br></div>",
+    and never-edited AnkiWeb templates look like "&nbsp;\n" — those must
+    count as empty so Tab-to-Generate can fill them. But a field holding
+    an <img>/<audio>/<video>/etc. is NOT empty: stripping every tag (as
+    extract_base_text does) makes "<br><img src=...>" look blank and let
+    the fill-empty guard overwrite the user's media (お好み焼き bug).
+    """
+    if not field_html:
+        return True
+    text = field_html.strip()
+    if not text:
+        return True
+    # Any embedded media/widget element is real user content.
+    if re.search(r'<\s*(img|audio|video|source|svg|object|embed|iframe|canvas|picture)\b',
+                 text, flags=re.IGNORECASE):
+        return False
+    # No media: fall back to visible text after removing ruby readings,
+    # tags, and the non-breaking-space placeholders editors emit.
+    no_rt = _RT_RE.sub("", text)
+    no_rp = _RP_RE.sub("", no_rt)
+    plain = _TAG_RE.sub("", no_rp)
+    plain = html.unescape(plain).replace("\xa0", " ").strip()
+    return not plain
+
+
 def extract_clean_word(field_text: str) -> str:
     """Extracts the clean target word/expression from a note field."""
     if not field_text:
