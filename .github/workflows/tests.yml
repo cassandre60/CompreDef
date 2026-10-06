@@ -1,0 +1,28 @@
+# CompreDef test gate — runs on every push and pull request.
+#
+# Policy (user directive, 2026-10-06): verification happens HERE, never by
+# running the suites on the developer machine. Push, then watch:
+#   gh run watch --exit-status
+#
+# Both suites are hermetic (stubbed aqt/collection/DB, no Anki/PyQt,
+# no network — real-dictionary/Yomitan smokes self-skip), so a plain
+# setup-python runner is all they need. Exit code 0 = safe to release.
+
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ring 0 — isolated unit tests
+        run: python3 tests/test_units.py
+      - name: Ring 1 — regression suite
+        run: python3 tests/test_regression.py

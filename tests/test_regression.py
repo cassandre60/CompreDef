@@ -1933,9 +1933,10 @@ def test_cd_toggle_and_japanese_scope_guess() -> None:
               f"got {seen.get('label')}")
 
         # 3. Visual sync never crashes headless editors (no webview).
-        #    The pressed look is UI-handled (toggleable button): the sync
-        #    only sets the active class + tooltip to match the config —
-        #    no tick character is ever written into the label.
+        #    The pressed blue comes from Anki's own theme variables
+        #    (Chinese Support 3's mechanism) — asserted structurally
+        #    below; the label text is never rewritten (no ticks, no
+        #    childNodes walk).
         class FakeWeb:
             def __init__(self):
                 self.js = ""
@@ -1950,20 +1951,29 @@ def test_cd_toggle_and_japanese_scope_guess() -> None:
         try:
             eb._set_toggle_visual(object(), True)
             eb._sync_toggle_visual(object())
-            web_ed = WebEditor()
-            eb._set_toggle_visual(web_ed, False)
-            js_ok = ("compredef_editor_btn" in web_ed.web.js
-                     and "active" in web_ed.web.js
-                     and "✓" not in web_ed.web.js
-                     and "✕" not in web_ed.web.js
-                     and "\\u2713" not in web_ed.web.js
-                     and "\\u2715" not in web_ed.web.js
-                     and "childNodes" not in web_ed.web.js)
+            web_on = WebEditor()
+            eb._set_toggle_visual(web_on, True)
+            web_off = WebEditor()
+            eb._set_toggle_visual(web_off, False)
+            js_ok = (
+                'classList.add("active")' in web_on.web.js
+                and "--button-bg" in web_on.web.js
+                and "var(--button-primary-bg)" in web_on.web.js
+                and "--button-gradient-start" in web_on.web.js
+                and "--button-gradient-end" in web_on.web.js
+                and 'classList.remove("active")' in web_off.web.js
+                and "childNodes" not in web_on.web.js
+                and "childNodes" not in web_off.web.js
+                and "✓" not in web_on.web.js
+                and "✕" not in web_off.web.js
+                and "\\u2713" not in web_on.web.js
+                and "\\u2715" not in web_off.web.js
+            )
             visual_ok = bool(js_ok)
         except Exception:
             visual_ok = False
         check("toggle: visual sync is headless-safe", visual_ok)
-        check("toggle: sync JS never touches the label text", visual_ok)
+        check("toggle: ON sync paints theme blue, OFF clears it", visual_ok)
 
         # 4. Tab bypasses Scope: French-deck note fires when toggle ON.
         class FakeNote:

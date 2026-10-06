@@ -19,15 +19,15 @@ more of the real world (DB, Qt, network, collection).
 
 | Ring | What | Runs where / when | Cost |
 |---|---|---|---|
-| **Ring 0 — units** (`tests/test_units.py`) | Every PURE function called in isolation with plain parameters (strings, dicts, lists, tmp files): text helpers, scorer edges, scope config/name math, dataclass contracts, renderer nodes, candidate filter, mastery math, reading normalization, error-state roundtrips. No Anki, no collection, no DB, no Qt, no network. Exit 0 = gate, alongside the regression suite. | `python3 tests/test_units.py`, before every commit | milliseconds |
-| **Ring 1 — regressions** (`tests/test_regression.py`) | Incident-named tests against fakes (stub `aqt`/collection/DB): decision matrices, snapshots, scoring algorithms, hook wiring, static guards. A bug fixed here earns a permanent test named after the incident. Exit 0 = gate. | `python3 tests/test_regression.py`, before every commit | ~2 s |
+| **Ring 0 — units** (`tests/test_units.py`) | Every PURE function called in isolation with plain parameters (strings, dicts, lists, tmp files): text helpers, scorer edges, scope config/name math, dataclass contracts, renderer nodes, candidate filter, mastery math, reading normalization, error-state roundtrips. No Anki, no collection, no DB, no Qt, no network. | GitHub Actions (`tests` workflow) on every push/PR — never on the dev machine (user directive 2026-10-06). | milliseconds |
+| **Ring 1 — regressions** (`tests/test_regression.py`) | Incident-named tests against fakes (stub `aqt`/collection/DB): decision matrices, snapshots, scoring algorithms, hook wiring, static guards. A bug fixed here earns a permanent test named after the incident. | GitHub Actions (`tests` workflow) on every push/PR — never on the dev machine. Green CI = gate. | ~2 s |
 | **Ring 2 — debug tooling** (`debug/`) | On-demand, symptom-driven: `sanity_knowledge.py` (snapshot sanity, Anki stubbed), `smoke_dialog.py` (headless offscreen Learner-Knowledge window: tabs, sorting, Browser search — needs local Anki + collection), `console_snippets.md` (live-collection Debug Console recipes). Never in CI. | After touching the area they cover | seconds–minutes |
 | **Ring 3 — real-collection verification** | Offscreen runs of dialog + scoring against the real 57k-note collection (ad-hoc heredocs following the `smoke_dialog.py` pattern). Catches environment-specific issues hermetic fixtures cannot. | Before releases touching scoring/knowledge | minutes |
 | **Ring 4 — release pipeline** (`./scripts/ci.sh`) | Units + regressions → commit → push → version bump → GitHub Release → watched AnkiWeb upload → local auto-install. | Every finished session | minutes |
 
-While iterating, run targeted checks first, then Ring 0, then Ring 1,
-then `./verify`-equivalent (`build.sh`) before declaring done:
-`tiny test → targeted suite → full suites → CI`.
+While iterating, push early and let CI verify (`gh run watch
+--exit-status`): local suite runs are banned by user directive —
+CI is the gate. `tiny test → push → CI green → release`.
 
 ## Per-function coverage map
 

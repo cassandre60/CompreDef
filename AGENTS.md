@@ -35,20 +35,16 @@ changes consistent with them.
 - Anki versions differ in their Qt backend. When importing UI components, always import from `aqt.qt` (e.g., `from aqt.qt import QDialog, QVBoxLayout, QPushButton`) rather than hardcoding `PyQt5` or `PyQt6`.
 
 ## 6. Regression Test & Build Mandate
-- **BEFORE committing and pushing**, run both suites and ensure they are fully green:
-  `python3 tests/test_units.py && python3 tests/test_regression.py`
-  (Ring 0 isolated unit tests, then the Ring 1 regression suite —
-  `scripts/build.sh` and `scripts/ci.sh` run both automatically.)
-- Alternatively, run the CI script to test, commit, and push in one go:
-  `./scripts/ci.sh`
-- **At the END of every code-change session**, build the installable package so the user can test locally:
-  `./scripts/build.sh` → produces `dist/CompreDef.ankiaddon`
-  (runs the regression suite first, then packages + verifies. No git side effects — use `./scripts/release.sh` for actual releases.)
-  **NEW:** `build.sh` now ends with `[4/4] Auto local install` — the freshly built
-  `.ankiaddon` is automatically unzipped to the local Anki profile
-  (`~/.local/share/Anki2/addons21/1619602654/`), so the user only needs one
-  restart (the script preserves `user_files/`).
-- The suite guards the project's historical bugs (plain-text definitions replacing rich Yomitan HTML, furigana polluting kanji scores, order-dependent picks, reference-title filtering, ZIP/folder parity, stale SQLite caches, Tab-to-Generate overwrites). Exit code 0 = safe to commit; any FAIL = fix the regression first.
+- **Verification runs in CI, never on this machine** (user directive
+  2026-10-06): do NOT run `tests/test_units.py`,
+  `tests/test_regression.py`, `scripts/build.sh` or `scripts/ci.sh`
+  locally. Push the branch and let the `tests` workflow
+  (`.github/workflows/tests.yml`) verify; watch it with
+  `gh run watch --exit-status`. A green CI run is the gate —
+  exit code 0 = safe to release; any FAIL = fix forward, never commit
+  over it.
+  (Ring 0 isolated unit tests, then the Ring 1 regression suite.)
+- The suite guards the project's historical bugs (plain-text definitions replacing rich Yomitan HTML, furigana polluting kanji scores, order-dependent picks, reference-title filtering, ZIP/folder parity, stale SQLite caches, Tab-to-Generate overwrites). Green CI = safe; any FAIL = fix first.
 - It runs on both system Python and Anki's bundled Python (no Anki/PyQt required — `aqt` is stubbed automatically). Real-dictionary smoke tests self-skip when the dictionaries are absent.
 - If you intentionally change rendering behavior, bump `RENDERER_VERSION` in `parser.py` so users' SQLite caches invalidate cleanly, and update the affected test expectations in the same commit.
 

@@ -825,26 +825,37 @@ def _toggle_tip(enabled: bool) -> str:
 def _set_toggle_visual(editor, enabled: bool) -> None:
     """Reflects the toggle state on one editor's toolbar button.
 
-    The button is `toggleable`, so Anki's own toolbar UI flips the
-    pressed (`active`) look on click — the click is handled by the UI,
-    no tick character is ever added to the text. The config is the
-    source of truth, so after every flip and on every note load the
-    pressed state + tooltip are set explicitly to match. Never raises
-    (headless/test editors have no webview).
+    Copied from Chinese Support 3's `updateButton`: the pressed (blue)
+    look comes from Anki's own theme variables
+    (`--button-primary-*`, the same blue as native toggles) — nothing
+    is hard-coded and the label text ("CD" + icon) is never rewritten.
+    Needed because raw `.anki-addon-button` elements have no `.active`
+    CSS rule in Anki, so the UI-flipped `active` class alone is
+    invisible; these inline variables are what make ON blue (and
+    readable in dark mode too). Never raises (headless/test editors
+    have no webview).
     """
     try:
         web = getattr(editor, "web", None)
         if web is None or not hasattr(web, "eval"):
             return
-        state = "true" if enabled else "false"
-        web.eval(
-            "(function(){var b=document.getElementById("
-            f"{json.dumps(_TOGGLE_BUTTON_ID)});"
-            "if(!b){return;}"
-            f"b.classList.toggle('active',{state});"
-            f"b.title={json.dumps(_toggle_tip(enabled))};"
-            "})();"
-        )
+        grab = (f'document.getElementById({json.dumps(_TOGGLE_BUTTON_ID)})')
+        if enabled:
+            web.eval(
+                f'{grab}.classList.add("active");'
+                f'{grab}.style.setProperty("--button-bg", "var(--button-primary-bg)");'
+                f'{grab}.style.setProperty("--button-gradient-start", "var(--button-primary-gradient-start)");'
+                f'{grab}.style.setProperty("--button-gradient-end", "var(--button-primary-gradient-end)");'
+                f'{grab}.title={json.dumps(_toggle_tip(True))};'
+            )
+        else:
+            web.eval(
+                f'{grab}.classList.remove("active");'
+                f'{grab}.style.setProperty("--button-bg", "");'
+                f'{grab}.style.setProperty("--button-gradient-start", "");'
+                f'{grab}.style.setProperty("--button-gradient-end", "");'
+                f'{grab}.title={json.dumps(_toggle_tip(False))};'
+            )
     except Exception:
         pass
 
