@@ -136,6 +136,12 @@ CompreDef/
 
 ---
 
+## Support
+
+Building small, useful software — if this project saves you time, consider [buying me a coffee](https://buymeacoffee.com/cassandre60) to help keep it maintained.
+
+<a href="https://buymeacoffee.com/cassandre60"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="150" alt="Buy Me A Coffee"></a>
+
 ## License
 
 GNU General Public License v3 or later.
